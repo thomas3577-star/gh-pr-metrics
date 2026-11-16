@@ -11,7 +11,7 @@ Evaluate how well a team's pull requests (PRs) move through review, whether merg
 ## Who and what is counted
 
 - **People:** only the GitHub logins listed under `authors` in the config; everyone if the list is empty. Bot accounts are never counted.
-- **Repos:** only the repos listed under `repos`.
+- **Repos:** only the repos listed under `repos`. Each repo is reported separately; numbers are never combined across repos.
 - **Periods:** results are shown in columns of equal length, set by `group_by` in the config: 1 week, 2 weeks or a calendar month. Week columns line up with `group_starts_on`, so they match sprints. A normal run shows the last `show_last` columns; a run can instead show every column since `history_start`, the columns in the last few weeks or months, or one chosen date range beside the same number of days just before it. The latest column is marked "in progress" until it ends. Columns are labelled by their dates.
 - **Which period a PR counts in:** the period it was merged in (or closed, if closed without merging).
 - **Clock:** period boundaries use the `utc_offset` time zone (India: +05:30). Durations are calendar time, including weekends.
@@ -26,7 +26,7 @@ Evaluate how well a team's pull requests (PRs) move through review, whether merg
 | 3. Are reviews skipped? | % merged without approval |
 | 4. Are merged changes stable? | % of merged PRs later reverted |
 | 5. Are PRs small enough to review well? | Lines changed per PR, beside an industry benchmark |
-| 6. Is unfinished work piling up? | Age of open PRs; time since last activity on open PRs; % closed without merging |
+| 6. Is unfinished work piling up? | Open PRs at period end; age of open PRs; time since last activity on open PRs; % closed without merging |
 
 ### 1. Time to merge
 - PRs merged in the period. Time from PR opened to merged.
@@ -59,6 +59,7 @@ PRs merged in the period, split into four stages:
 - Includes generated files and lockfiles, so some PRs look bigger than the work behind them.
 
 ### 6. Unfinished work
+- **Open PRs:** the number of PRs still open at the end of the period. For the period in progress, open now.
 - **Open PR age:** for PRs still open at the end of the period, time from opened to the period's end. For the period in progress, to now.
 - **Time since last activity:** for PRs open now, time since the last update. Shown for the period in progress only, because past activity dates are not kept. No "idle" cut-off is applied [4][5][6].
 - **Closed without merging:** PRs closed unmerged in the period ÷ all PRs closed or merged in the period, as a %.

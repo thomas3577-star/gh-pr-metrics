@@ -27,12 +27,12 @@ Read it to get `host` and `repos` for the confirmation.
 
 ## 2. Work out what was asked
 
-| The Product Owner says                 | Report option                            |
-| -------------------------------------- | ---------------------------------------- |
-| Nothing about dates ("run PR metrics") | *(none)*                                 |
-| "since start", "from the beginning"    | `--since-start`                          |
-| "last N weeks" / "last N months"       | `--last "N weeks"` / `--last "N months"` |
-| Specific dates, e.g. "2 Nov to 15 Nov" | `--from YYYY-MM-DD --to YYYY-MM-DD`      |
+| Request (or similar wording)                        | Report option                               |
+| --------------------------------------------------- | ------------------------------------------- |
+| Run PR metrics                                      | *(none)*                                    |
+| Run PR metrics since start                          | `--since-start`                             |
+| Run PR metrics for the last 3 months (or "6 weeks") | `--last "3 months"` (or `--last "6 weeks"`) |
+| Run PR metrics from 2 Nov 2026 to 15 Nov 2026       | `--from 2026-11-02 --to 2026-11-15`         |
 
 Write dates as YYYY-MM-DD, copying the day, month and year given. If the year is not
 given or anything is unclear, ask before going on.
@@ -42,9 +42,7 @@ given or anything is unclear, ask before going on.
 Ask exactly one question, for example:
 "I'll fetch PRs from `<host>` for `<repos>` (incremental, since the last run), then build
 the report for <what they asked, in their words>. Go ahead?"
-Do nothing until they confirm.
-
-## 4. Fetch
+Do nothing until they confirm. 
 
 ## 4. Fetch the data
 
@@ -68,35 +66,17 @@ If the fetch stops for any other reason, explain the message in plain words and 
 Run `python scripts/metrics.py` with the report option from step 2.
 Note the folder on the last line, `Run folder: output/...`.
 
-## 6. Write observations
-
-Write `<run folder>/insights.md` containing only 3 to 5 lines, each starting with `- `.
-Each line is one or two sentences:
-
-- Use only labels, numbers and better / worse / same as printed by `metrics.py`. You may
-  say a value rose or fell between two columns, quoting both printed values. No
-  differences, ratios or averages.
-- Connect measures where the printed numbers allow (for example, PR size and time to
-  merge moving the same way), and point out which stage of question 2 is largest.
-- Turn concerns into questions for the team ("Was this an urgent fix?"). Never state a
-  cause as fact.
-- When a column has few PRs, say the number may be noise.
-- Team level only. No names or logins.
-
-If you cannot write useful observations, write nothing.
-
-## 7. Build the report
+## 6. Build the report
 
 Run `python scripts/report.py <run folder>`.
 
-## 8. Reply
+## 7. Reply
 
 Reply in chat with, in this order:
 
 1. The "Report covers:" line, as printed.
-2. The same observations you wrote to `insights.md`. Do not write a second summary.
-3. Any lines starting with `Note:`, as printed.
-4. The report path, `<run folder>/report.html`.
+2. Any lines starting with `Note:`, as printed.
+3. Every report path printed by report.py (lines starting `Report:`), one per repo.
 
 # Finding logins
 

@@ -1,4 +1,4 @@
-"""Calculate every number defined in METRICS.md from data/prs.json.
+"""Calculate every number defined in METRICS.md from the saved data in data/.
 
 Usage (from the repo folder), one of:
   python scripts/metrics.py                          the last `show_last` columns
@@ -11,8 +11,10 @@ Usage (from the repo folder), one of:
 Columns follow `group_by` ("1 week", "2 weeks" or "month") in the config, lined
 up with `group_starts_on`. Reads only saved data (no GitHub access).
 Step 1 works out each PR's values; step 2 the median, p75 and counts per column.
-Creates a run folder output/YYYYMMDD-HHMMSS (local time), writes results.json
-into it, and prints a summary for the agent to repeat word for word.
+Each repo is calculated on its own; nothing is combined across repos.
+Creates a run folder output/YYYYMMDD-HHMMSS (local time), writes one
+results-<owner>-<name>.json per repo into it, and prints a summary for the
+agent to repeat word for word.
 
 Exit codes: 0 ok, 2 setup, config or range problem.
 """
@@ -30,16 +32,16 @@ from pathlib import Path
 ELITE_PR_LINES = 100  # METRICS.md, PR size, references [1][2][7]
 
 # Measures where lower is clearly better, so the report marks better or worse.
-# Draft time and closed-without-merging are left out on purpose.
+# Draft time, open PR age and closed-without-merging are left out on purpose.
 MARKED = {
-    "time_to_merge_days": ("Time to merge", "median d"),
-    "stage_wait_first_review_days": ("Waiting for first review", "median d"),
-    "stage_in_review_days": ("In review", "median d"),
-    "stage_wait_to_merge_days": ("Waiting to merge", "median d"),
+    "time_to_merge_days": ("Time to merge, median", "d"),
+    "stage_wait_first_review_days": ("Waiting for first review, median", "d"),
+    "stage_in_review_days": ("In review, median", "d"),
+    "stage_wait_to_merge_days": ("Waiting to merge, median", "d"),
     "merged_without_approval": ("Merged without approval", "%"),
     "reverted_minimum": ("Reverted (minimum)", "%"),
-    "size_lines": ("PR size", "median lines"),
-    "open_pr_age_days": ("Open PR age at column end", "median d"),
+    "size_lines": ("PR size, median", "lines"),
+    "open_prs_at_end": ("Open PRs at period end", "PRs"),
 }
 
 
@@ -54,6 +56,10 @@ def when(text):
 
 def days(start, end):
     return (end - start).total_seconds() / 86400
+
+
+def iso_or_none(dt):
+    return dt.strftime("%Y-%m-%dT%H:%M:%SZ") if dt else None
 
 
 def prs(n):
@@ -92,19 +98,31 @@ def load_config(path):
         stop(2, "config 'utc_offset' must look like \"+05:30\"")
     sign = 1 if m[1] == "+" else -1
     tz = timezone(sign * timedelta(hours=int(m[2]), minutes=int(m[3])))
-    return {"authors": [a.lower() for a in authors], "history_start": a_date("history_start"),
+    repos = cfg.get("repos")
+    if not isinstance(repos, list) or not repos or not all(isinstance(r, str) and r.count("/") == 1
+                                                           for r in repos):
+        stop(2, "config 'repos' must list repos written as owner/name")
+    return {"repos": repos, "authors": [a.lower() for a in authors],
+            "history_start": a_date("history_start"),
             "group_by": group_by,
             "group_starts_on": a_date("group_starts_on") if group_by != "month" else None,
             "show_last": show_last, "utc_offset": m[0], "tz": tz}
 
 
-def load_data(path):
-    try:
-        return json.loads(Path(path).read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        stop(2, f"no saved data at {path}. Run scripts/fetch.py first.")
-    except json.JSONDecodeError:
-        stop(2, f"saved data {path} is damaged. Run a full fetch to rebuild it.")
+def load_data(data_dir, repos):
+    """Saved data for the configured repos: all PRs together, plus each repo's own details."""
+    all_prs, meta = {}, {}
+    for repo in repos:
+        path = Path(data_dir) / f"prs-{repo.replace('/', '-')}.json"
+        try:
+            d = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            stop(2, f"no saved data for {repo}. Run scripts/fetch.py first.")
+        except json.JSONDecodeError:
+            stop(2, f"saved data for {repo} is damaged. Run scripts/fetch.py to rebuild it.")
+        all_prs.update(d["prs"])
+        meta[repo] = d["meta"]
+    return all_prs, meta
 
 
 # ---------- columns ----------
@@ -175,8 +193,12 @@ def choose_columns(cfg, args, now):
         n = int(m[1])
         since = now - timedelta(weeks=n) if m[2].startswith("week") else months_shift(now, -n)
         chosen = [g for g in groups if g[1] > since]
+        if since < first:
+            args.short_note = f"the last {n} {m[2]}"
     else:
         chosen = groups[-cfg["show_last"]:]
+        if len(chosen) < cfg["show_last"]:
+            args.short_note = f"{cfg['show_last']} periods"
     return [(s, e, cfg["group_by"] == "month") for s, e in chosen]
 
 
@@ -228,6 +250,8 @@ def per_pr(key, pr, reverted):
         "key": key, "url": pr["url"], "title": pr["title"], "author": author,
         "outcome": outcome, "created": pr["createdAt"], "merged": pr["mergedAt"],
         "closed": pr["closedAt"], "updated": pr["updatedAt"], "column": None,
+        "ready_at": iso_or_none(ready if pr["timelineItems"]["nodes"] else None),
+        "first_review_at": iso_or_none(first_review), "last_approval_at": iso_or_none(last_approval),
         "size_lines": pr["additions"] + pr["deletions"],
         "time_to_merge_days": None, "draft_days": None, "wait_first_review_days": None,
         "in_review_days": None, "wait_to_merge_days": None,
@@ -243,6 +267,12 @@ def per_pr(key, pr, reverted):
             row["in_review_days"] = max(days(first_review, last_approval), 0)
         if last_approval:
             row["wait_to_merge_days"] = days(last_approval, merged)
+    # Per-PR values are kept to 2 decimals, and medians are taken from these same
+    # values, so anyone can reproduce them from the report's PR list in Excel.
+    for k in ("time_to_merge_days", "draft_days", "wait_first_review_days",
+              "in_review_days", "wait_to_merge_days"):
+        if row[k] is not None:
+            row[k] = round(row[k], 2)
     return row
 
 
@@ -288,6 +318,7 @@ def per_column(rows, columns, cfg, now):
             "merged_without_approval": share(sum(not r["approved"] for r in merged), len(merged)),
             "reverted_minimum": share(sum(r["reverted"] for r in merged), len(merged)),
             "size_lines": spread(r["size_lines"] for r in merged),
+            "open_prs_at_end": {"value": len(open_then)},
             "open_pr_age_days": spread(days(when(r["created"]), age_at) for r in open_then),
             "closed_without_merging": share(len(closed), len(merged) + len(closed)),
         })
@@ -296,6 +327,8 @@ def per_column(rows, columns, cfg, now):
 
 def headline(m):
     """The single value compared between columns: median, or % for shares."""
+    if "value" in m:
+        return m["value"]
     return m.get("median") if "median" in m else m.get("pct")
 
 
@@ -315,10 +348,16 @@ def add_markers(cols):
 
 # ---------- summary for the agent ----------
 
-def cell(m):
+def cell(m, unit="d"):
+    """Value with its unit and PR count, e.g. '2.5 d (61 PRs)' or '0% (0 of 61 PRs)'."""
     v = headline(m)
-    n = m.get("count") if "median" in m else m.get("of")
-    return "-" if v is None else f"{v:g}{'%' if 'pct' in m else ''} ({n})"
+    if v is None:
+        return "-"
+    if "value" in m:
+        return prs(v)
+    if "pct" in m:
+        return f"{v}% ({m['count']} of {prs(m['of'])})"
+    return f"{v:g} {unit} ({prs(m['count'])})"
 
 
 def summary_lines(cols, compared, activity):
@@ -328,19 +367,23 @@ def summary_lines(cols, compared, activity):
         mark = marked.get(key)
         tail = (f"  -> {compared[0]} {'same as' if mark == 'same' else mark + ' than'} {compared[1]}"
                 if mark else "")
-        lines.append(f"  {lab} ({unit}, PR count): "
-                     + " | ".join(f"{c['label']} {cell(c[key])}" for c in cols) + tail)
+        lines.append(f"  {lab}: "
+                     + " | ".join(f"{c['label']} {cell(c[key], unit)}" for c in cols) + tail)
     lines.append(f"  PR size benchmark: elite teams under {ELITE_PR_LINES} lines")
     cur = next((c for c in cols if c["in_progress"]), None)
     if cur:
         lines.append(f"In progress: {cur['label']}, {prs(cur['time_to_merge_days']['count'])} "
                      f"merged so far. Open PRs now: median age {cell(cur['open_pr_age_days'])}; "
-                     f"median time since last activity {cell(activity)} (days, PR count)")
+                     f"median time since last activity {cell(activity)}")
     return lines
 
 
 def plain_notes(n):
     msgs = []
+    if n.get("short_note"):
+        msgs.append(f"Asked for {n['short_note']}, but saved data starts on {n['history_start']}, "
+                    "so the report starts there. To go further back, set an earlier history_start "
+                    "and do a full refresh.")
     if n["authors_with_no_prs"]:
         msgs.append("No PRs found for login(s) " + ", ".join(n["authors_with_no_prs"])
                     + ". Check the spelling in the config.")
@@ -360,7 +403,7 @@ def plain_notes(n):
 def main():
     ap = argparse.ArgumentParser(description="Calculate PR metrics from saved data.")
     ap.add_argument("--config", default="pr-metrics.config.toml")
-    ap.add_argument("--data", default="data/prs.json")
+    ap.add_argument("--data-dir", default="data")
     ap.add_argument("--out-dir", default="output")
     rng = ap.add_mutually_exclusive_group()
     rng.add_argument("--since-start", action="store_true")
@@ -370,7 +413,7 @@ def main():
     args = ap.parse_args()
 
     cfg = load_config(args.config)
-    data = load_data(args.data)
+    all_prs, meta = load_data(args.data_dir, cfg["repos"])
     now = datetime.now(timezone.utc).astimezone(cfg["tz"])
     if midnight(cfg["history_start"], cfg["tz"]) > now:
         stop(2, f"history_start {cfg['history_start']} is in the future.")
@@ -378,58 +421,77 @@ def main():
     if not columns:
         stop(2, "no columns in that range. Try a longer --last or --since-start.")
 
-    reverted = find_reverted(data["prs"])  # across every saved PR, any author
-    rows, bots, not_listed = [], 0, 0
-    for key, pr in data["prs"].items():
+    reverted = find_reverted(all_prs)  # within each repo, revert PRs by anyone
+    by_repo = {repo: {"rows": [], "bots": 0, "not_listed": 0} for repo in cfg["repos"]}
+    range_start, range_end = columns[0][0], columns[-1][1]
+
+    def in_range(pr):
+        """Open now, or merged/closed within the periods this report shows."""
+        t = when(pr["mergedAt"] or pr["closedAt"])
+        return t is None or range_start <= t < range_end
+
+    for key, pr in all_prs.items():
+        bucket = by_repo.get(key.split("#")[0])
+        if bucket is None:
+            continue
         author = pr.get("author") or {}
         if author.get("__typename") == "Bot":
-            bots += 1
+            bucket["bots"] += in_range(pr)
         elif cfg["authors"] and (author.get("login") or "").lower() not in cfg["authors"]:
-            not_listed += 1
+            bucket["not_listed"] += in_range(pr)
         else:
-            rows.append(per_pr(key, pr, reverted))
+            bucket["rows"].append(per_pr(key, pr, reverted))
 
-    cols = per_column(rows, columns, cfg, now)
-    compared = add_markers(cols)
-    activity = spread(days(when(r["updated"]), now) for r in rows if r["outcome"] == "open")
-    shown = [r for r in rows if r["column"] or r["outcome"] == "open"]
-    found = {r["author"].lower() for r in rows}
-    first, last = cols[0], cols[-1]
-    if args.date_from:
-        scope = f"{last['start']} to {last['end']}, beside {first['start']} to {first['end']}"
-    else:
-        unit = "1 month" if cfg["group_by"] == "month" else cfg["group_by"]
-        scope = f"{len(cols)} columns of {unit}, {first['start']} to {last['end']}"
-    notes = {
-        "generated_at": now.strftime("%Y-%m-%dT%H:%M:%S%z"),
-        "data_as_of": data["meta"]["last_success_started_at"],
-        "host": data["meta"]["host"], "repos": data["meta"]["repos"],
-        "authors": cfg["authors"] or "everyone", "scope": scope,
-        "utc_offset": cfg["utc_offset"], "compared": compared,
-        "bot_prs_left_out": bots, "unlisted_author_prs_left_out": not_listed,
-        "partial_columns": [c["label"] for c in cols if c["partial"]],
-        "reviews_cut_at_100": [r["key"] for r in shown if r["reviews_truncated"]],
-        "authors_with_no_prs": sorted(set(cfg["authors"]) - found),
-    }
-    notes["messages"] = plain_notes(notes)
-    results = {
-        "summary": {"columns": cols, "current_time_since_last_activity_days": activity,
-                    "elite_pr_lines": ELITE_PR_LINES},
-        "notes": notes,
-        "prs": shown,
-    }
+    # A login is only flagged if it has no PRs in any repo.
+    found = {r["author"].lower() for b in by_repo.values() for r in b["rows"]}
+    missing = sorted(set(cfg["authors"]) - found)
     run_dir = Path(args.out_dir) / now.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
-    (run_dir / "results.json").write_text(
-        json.dumps(results, indent=1, ensure_ascii=False), encoding="utf-8")
+    print("PR metrics")
 
-    print(f"PR metrics, data as of {notes['data_as_of']}, {prs(len(shown))} in this report")
-    print(f"Report covers: {scope}")
-    for line in summary_lines(cols, compared, activity):
-        print(line)
-    for msg in notes["messages"]:
-        print(f"Note: {msg}")
-    print(f"Run folder: {run_dir.as_posix()}")
+    for repo, b in by_repo.items():
+        rows = b["rows"]
+        cols = per_column(rows, columns, cfg, now)
+        compared = add_markers(cols)
+        activity = spread(days(when(r["updated"]), now) for r in rows if r["outcome"] == "open")
+        shown = [r for r in rows if r["column"] or r["outcome"] == "open"]
+        first, last = cols[0], cols[-1]
+        if args.date_from:
+            scope = f"{last['start']} to {last['end']}, beside {first['start']} to {first['end']}"
+        else:
+            unit = "1 month" if cfg["group_by"] == "month" else cfg["group_by"]
+            scope = f"{len(cols)} columns of {unit}, {first['start']} to {last['end']}"
+        notes = {
+            "repo": repo, "generated_at": now.strftime("%Y-%m-%dT%H:%M:%S%z"),
+            "data_as_of": meta[repo]["last_success_started_at"], "host": meta[repo]["host"],
+            "authors": cfg["authors"] or "everyone", "scope": scope,
+            "utc_offset": cfg["utc_offset"], "compared": compared,
+            "bot_prs_left_out": b["bots"], "unlisted_author_prs_left_out": b["not_listed"],
+            "partial_columns": [c["label"] for c in cols if c["partial"]],
+            "reviews_cut_at_100": [r["key"] for r in shown if r["reviews_truncated"]],
+            "authors_with_no_prs": missing,
+            "short_note": getattr(args, "short_note", None),
+            "history_start": cfg["history_start"].isoformat(),
+        }
+        notes["messages"] = plain_notes(notes)
+        results = {
+            "summary": {"columns": cols, "current_time_since_last_activity_days": activity,
+                        "elite_pr_lines": ELITE_PR_LINES},
+            "notes": notes,
+            "prs": shown,
+        }
+        slug = repo.replace("/", "-")
+        (run_dir / f"results-{slug}.json").write_text(
+            json.dumps(results, indent=1, ensure_ascii=False), encoding="utf-8")
+
+        print(f"\n== {repo}: {prs(len(shown))} in this report, data as of "
+              f"{meta[repo]['last_success_started_at']} ==")
+        print(f"Report covers: {scope}")
+        for line in summary_lines(cols, compared, activity):
+            print(line)
+        for msg in notes["messages"]:
+            print(f"Note ({repo}): {msg}")
+    print(f"\nRun folder: {run_dir.as_posix()}")
 
 
 if __name__ == "__main__":
