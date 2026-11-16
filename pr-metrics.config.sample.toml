@@ -1,0 +1,40 @@
+# gh-pr-metrics settings: SAMPLE.
+# Copy this file to pr-metrics.config.toml and put your real values there.
+# pr-metrics.config.toml is never committed, so your server name, repos and
+# logins stay on your machine.
+
+# Your GitHub server. Use "github.com" for public GitHub.
+host = "github.com"
+
+# Repos to include, as "owner/name".
+repos = [
+  "owner/repo-a",
+  "owner/repo-b",
+]
+
+# GitHub logins of the people whose PRs are measured. Leave empty for everyone.
+# Bot accounts are never counted.
+# Logins, not display names. The agent can look up logins from names for you.
+authors = [
+  "login1",
+  "login2",
+]
+
+# Earliest date the report ever needs (YYYY-MM-DD). A full fetch reaches back
+# to here, and "since start" reports begin here.
+history_start = 2026-05-18
+
+# How the report splits time into columns: "1 week", "2 weeks" or "month".
+# Sprint teams: your sprint length. Kanban teams: whichever suits.
+group_by = "2 weeks"
+
+# Any date a column should start on, so columns line up with your sprints
+# (e.g. the first day of any sprint). Not used when group_by = "month".
+group_starts_on = 2026-05-18
+
+# How many columns a normal run shows.
+show_last = 6
+
+# Your time zone as an offset from UTC. Column boundaries use this clock.
+# India: "+05:30"
+utc_offset = "+05:30"

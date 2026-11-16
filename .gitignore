@@ -1,0 +1,11 @@
+# Your real settings: server, repos, logins. Never commit.
+pr-metrics.config.toml
+
+# Saved PR data and reports: company data, never commit
+data/
+output/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
