@@ -34,22 +34,19 @@ flowchart LR
 | Run PR metrics from 2 Nov 2026 to 15 Nov 2026 | That range, beside the same number of days before it |
 | Add "full refresh" to any of the above        | All data downloaded again                            |
 
-## Read the report
+## Read and check the report
 
-Each repo gets its own report: open `output/<date-time>/report-<owner>-<name>.html` in any browser.
+Each repo gets its own report. Open `output/<date-time>/report-<owner>-<name>.html` in any browser.
 
-- One table per question; columns are periods, labelled by date.
-- Each cell: typical PR (median) · slower end (p75) (PR count).
-- ▼ better / ▲ worse / = same compares the latest complete period with the one before.
-  One period alone is often noise: look across several.
-- Notes flag anything that affects the numbers. The PR list at the end filters by period and author.
+- Each table answers one question. Each column is a period, shown by its dates.
+- Each cell shows a typical PR, a slow PR, and how many PRs: `median · p75 (count)`.
+- ▼ means better than the period before, ▲ means worse, = means the same.
+  Look at several periods, not just one.
+- Notes at the bottom explain anything that affects the numbers.
+- The PR list shows every PR behind the numbers. Filter it by period, status or author.
 
-## Check the numbers
-
-In a report's PR list, tick **Show calculation details** to see each PR's times and the
-days worked out from them. To check a period's figures: pick the period, click
-**Download shown rows as CSV**, open it in Excel and use `=MEDIAN()` and
-`=PERCENTILE.INC(range,0.75)`. They match the report (rarely off by 0.1 from rounding).
+**To check a number:** tick **Show calculation details** to see each PR's times.
+Pick a period, click **Download shown rows as CSV**, and open it in Excel.
 
 ## If it stops
 
@@ -62,6 +59,21 @@ days worked out from them. To check a period's figures: pick the period, click
 | … is before history_start                  | Ask for later dates, or set an earlier `history_start` and do a full refresh |
 | No PRs found for login(s)                  | Check those logins in the config                                             |
 
-Never committed: `pr-metrics.config.toml`, `data/` (saved PRs) and `output/` (reports).
+## Project structure
+
+```
+gh-pr-metrics/
+├── .github/agents/gh-pr-metrics.agent.md   the Copilot agent
+├── scripts/
+│   ├── fetch.py      gets PRs from GitHub (gh CLI)
+│   ├── metrics.py    calculates every number in METRICS.md
+│   └── report.py     builds one HTML report per repo
+├── METRICS.md        what every number means, with sources
+├── COMPARISON.md     what's improved over pr-metrics-agent
+├── pr-metrics.config.sample.toml   settings template
+├── pr-metrics.config.toml   your settings      (never committed)
+├── data/                    saved PRs per repo (never committed)
+└── output/                  reports per run    (never committed)
+```
 
 Built as a successor to [pr-metrics-agent](https://github.com/thomas3577-star/pr-metrics-agent): see [what's improved](COMPARISON.md).
