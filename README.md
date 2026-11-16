@@ -63,3 +63,5 @@ days worked out from them. To check a period's figures: pick the period, click
 | No PRs found for login(s)                  | Check those logins in the config                                             |
 
 Never committed: `pr-metrics.config.toml`, `data/` (saved PRs) and `output/` (reports).
+
+Built as a successor to [pr-metrics-agent](https://github.com/thomas3577-star/pr-metrics-agent): see [what's improved](COMPARISON.md).
