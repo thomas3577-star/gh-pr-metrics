@@ -4,6 +4,19 @@ A GitHub Copilot agent that shows how your team's pull requests (PRs) move throu
 time to merge, where the time goes, skipped reviews, reverts, PR size and unfinished work.
 Works with github.com and company GitHub servers. Every number is defined in [METRICS.md](METRICS.md).
 
+## Flow Diagram
+
+```mermaid
+flowchart LR
+    U([You]) -->|"Run PR metrics"| A[Copilot agent]
+    A --> F[fetch.py]
+    G[(GitHub)] -->|gh CLI| F
+    F --> D[(data/<br/>one file per repo)]
+    D --> M[metrics.py]
+    M --> R[report.py]
+    R --> H([report per repo<br/>.html])
+```
+
 ## Start in 3 steps
 
 1. **Install** VS Code with GitHub Copilot, [Python 3.11+](https://www.python.org/downloads/)
@@ -13,13 +26,13 @@ Works with github.com and company GitHub servers. Every number is defined in [ME
 3. **In Copilot Chat,** pick the **gh-pr-metrics** agent and type a request below.
    It asks you to confirm once, then builds the report.
 
-| Type | You get |
-|---|---|
-| Run PR metrics | The latest periods |
-| Run PR metrics since start | Every period since `history_start` |
-| Run PR metrics for the last 3 months | The last 3 months (or "6 weeks") |
+| Type                                          | You get                                              |
+| --------------------------------------------- | ---------------------------------------------------- |
+| Run PR metrics                                | The latest periods                                   |
+| Run PR metrics since start                    | Every period since `history_start`                   |
+| Run PR metrics for the last 3 months          | The last 3 months (or "6 weeks")                     |
 | Run PR metrics from 2 Nov 2026 to 15 Nov 2026 | That range, beside the same number of days before it |
-| Add "full refresh" to any of the above | All data downloaded again |
+| Add "full refresh" to any of the above        | All data downloaded again                            |
 
 ## Read the report
 
@@ -40,13 +53,13 @@ days worked out from them. To check a period's figures: pick the period, click
 
 ## If it stops
 
-| Message | Do this |
-|---|---|
-| gh is not signed in | Run the `gh auth login` command shown |
-| config file not found | Do step 2 |
-| settings changed since the last full fetch | Say yes when the agent offers a full fetch |
-| GitHub kept failing | GitHub is overloaded; try again later |
-| … is before history_start | Ask for later dates, or set an earlier `history_start` and do a full refresh |
-| No PRs found for login(s) | Check those logins in the config |
+| Message                                    | Do this                                                                      |
+| ------------------------------------------ | ---------------------------------------------------------------------------- |
+| gh is not signed in                        | Run the `gh auth login` command shown                                        |
+| config file not found                      | Do step 2                                                                    |
+| settings changed since the last full fetch | Say yes when the agent offers a full fetch                                   |
+| GitHub kept failing                        | GitHub is overloaded; try again later                                        |
+| … is before history_start                  | Ask for later dates, or set an earlier `history_start` and do a full refresh |
+| No PRs found for login(s)                  | Check those logins in the config                                             |
 
 Never committed: `pr-metrics.config.toml`, `data/` (saved PRs) and `output/` (reports).

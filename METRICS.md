@@ -2,7 +2,7 @@
 
 Version 1 · 2026-11-15
 
-This file defines every number in the report. The agent and the script follow it exactly. To change what a number means, change it here first and add a line to the change log.
+This file defines every number in the report. The scripts follow it exactly. To change what a number means, change it here first and add a line to the change log.
 
 ## Goal
 
@@ -12,10 +12,10 @@ Evaluate how well a team's pull requests (PRs) move through review, whether merg
 
 - **People:** only the GitHub logins listed under `authors` in the config; everyone if the list is empty. Bot accounts are never counted.
 - **Repos:** only the repos listed under `repos`. Each repo is reported separately; numbers are never combined across repos.
-- **Periods:** results are shown in columns of equal length, set by `group_by` in the config: 1 week, 2 weeks or a calendar month. Week columns line up with `group_starts_on`, so they match sprints. A normal run shows the last `show_last` columns; a run can instead show every column since `history_start`, the columns in the last few weeks or months, or one chosen date range beside the same number of days just before it. The latest column is marked "in progress" until it ends. Columns are labelled by their dates.
-- **Which period a PR counts in:** the period it was merged in (or closed, if closed without merging).
+- **Periods:** results are shown per period (1 week, 2 weeks or a calendar month, set in the config), labelled by date; the latest may be in progress.
+- **Which period a PR counts in:** the period it was merged in (or closed, if closed without merging). Questions 1 to 5 use PRs merged in the period.
 - **Clock:** period boundaries use the `utc_offset` time zone (India: +05:30). Durations are calendar time, including weekends.
-- **How results are shown:** the median (typical PR), the 75th percentile (p75: 75 in 100 PRs are at or below this) [2] and the PR count, always together, e.g. "p75: 4.2 days (12 PRs)". With few PRs, read p75 with the count.
+- **How results are shown:** median (typical PR) · p75 (75 in 100 PRs are at or below this) [2] · PR count. With few PRs, read p75 with the count.
 
 ## The six questions
 
@@ -28,11 +28,7 @@ Evaluate how well a team's pull requests (PRs) move through review, whether merg
 | 5. Are PRs small enough to review well? | Lines changed per PR, beside an industry benchmark |
 | 6. Is unfinished work piling up? | Open PRs at period end; age of open PRs; time since last activity on open PRs; % closed without merging |
 
-### 1. Time to merge
-- PRs merged in the period. Time from PR opened to merged.
-
 ### 2. Time per stage
-PRs merged in the period, split into four stages:
 
 | Stage | From | To |
 |---|---|---|
@@ -54,7 +50,7 @@ PRs merged in the period, split into four stages:
 - Always labelled "minimum": the true rate is at least this. It misses problems fixed without a revert, and PRs merged in recent periods have had less time to be reverted.
 
 ### 5. PR size
-- Lines added plus lines deleted, for PRs merged in the period. Median and p75.
+- Lines added plus lines deleted.
 - Shown beside the benchmark: elite teams' PRs are under 100 lines [1][2][7]. A comparison, not a pass or fail.
 - Includes generated files and lockfiles, so some PRs look bigger than the work behind them.
 
@@ -68,7 +64,7 @@ PRs merged in the period, split into four stages:
 
 1. [LinearB, 2026 Software Engineering Benchmarks Report](https://linearb.io/library/engineering-benchmarks-and-research). 8,109,244 PRs from 4,813 teams in 42 countries. Elite PR size is under 100 lines. Findings are correlational.
 2. [LinearB, engineering metrics](https://linearb.io/library/engineering-metrics) and [LinearB, metrics glossary](https://linearb.helpdocs.io/article/1s38stsugw-glossary-metrics). "Elite" is the top 10% of LinearB's customer teams. Benchmarks are calculated at p75. PR size counts added, deleted and modified lines, so it runs slightly higher than this report's added plus deleted.
-3. [Does Order Matter? An Empirical Investigation into the Impact of File Ordering on Code Review Effectiveness (2026)](https://arxiv.org/pdf/2609.22610). No current, evidence-based limit for a rushed review was found. The only review-speed limit (500 lines an hour) is from a 2006 study. This 2026 study of 330K PRs from 182 GitHub projects found review attention falls as PR size grows, and that visible review comments are a misleading sign of review effort.
+3. [Does Order Matter? An Empirical Investigation into the Impact of File Ordering on Code Review Effectiveness (2026)](https://arxiv.org/pdf/2609.22610). 330K PRs from 182 GitHub projects: review attention falls as PR size grows, and visible comments are a misleading sign of review effort.
 4. [Code Climate, Abandoned Pull Requests](https://codeclimate.com/blog/abandoned-pull-requests). Treats more than three days without activity as abandoned, based on its own data.
 5. [Wessel et al., Should I Stale or Should I Close? (2019)](https://www.ime.usp.br/~gerosa/papers/BotSE2019.pdf). The stale bot's default is 60 days without activity: a tool setting, not evidence.
 6. [Rahman et al., Why Do Pull Requests Go Silent? (2026)](https://arxiv.org/pdf/2609.22625). 14,234 stalled PRs from 19 GitHub repos. Inactivity is often caused by failing checks or dependencies, not neglect.
