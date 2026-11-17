@@ -102,6 +102,7 @@ def load_config(path):
 # ---------- saved data ----------
 
 def repo_file(data_dir, repo):
+    # metrics.py's load_data() builds the same file name: change both together.
     return Path(data_dir) / f"prs-{repo.replace('/', '-')}.json"
 
 
@@ -187,6 +188,30 @@ def fetch_repo(host, repo, since, states=()):
         cursor = page["pageInfo"]["endCursor"]
 
 
+# ---------- plan ----------
+
+def plan_repos(cfg, mode, data_dir):
+    """How to fetch each repo, as a list of (repo, path, saved, description).
+    saved is the repo's saved data for an incremental fetch, or None for a full fetch.
+    Full mode: every repo in full. Incremental mode: a repo with no saved file, or a
+    damaged one, is fetched in full; stops if host or history_start has changed."""
+    plan = []
+    for repo in cfg["repos"]:
+        path = repo_file(data_dir, repo)
+        saved = load_saved(path) if mode == "incremental" else None
+        if saved == "damaged":
+            plan.append((repo, path, None, "full (saved file was damaged)"))
+        elif saved is None:
+            plan.append((repo, path, None, "full" if mode == "full" else "full (new repo)"))
+        else:
+            changed = [k for k in ("host", "history_start") if saved["meta"].get(k) != cfg[k]]
+            if changed:
+                stop(2, f"settings changed since the last full fetch ({', '.join(changed)}). "
+                        "Run a full fetch.")
+            plan.append((repo, path, saved, "incremental"))
+    return plan
+
+
 # ---------- main ----------
 
 def main():
@@ -200,22 +225,7 @@ def main():
     start_of_history = (datetime.fromisoformat(cfg["history_start"]).replace(tzinfo=timezone.utc)
                         - OVERLAP)  # one extra day covers any time-zone offset
 
-    # Decide each repo's mode before fetching anything.
-    plan = []
-    for repo in cfg["repos"]:
-        path = repo_file(args.data_dir, repo)
-        saved = load_saved(path) if args.mode == "incremental" else None
-        if saved == "damaged":
-            plan.append((repo, path, None, "full (saved file was damaged)"))
-        elif saved is None:
-            plan.append((repo, path, None, "full" if args.mode == "full" else "full (new repo)"))
-        else:
-            changed = [k for k in ("host", "history_start") if saved["meta"].get(k) != cfg[k]]
-            if changed:
-                stop(2, f"settings changed since the last full fetch ({', '.join(changed)}). "
-                        "Run a full fetch.")
-            plan.append((repo, path, saved, "incremental"))
-
+    plan = plan_repos(cfg, args.mode, args.data_dir)  # decided before fetching anything
     check_signed_in(cfg["host"])
     print(f"Fetching from {cfg['host']}.")
     for repo, path, saved, how in plan:
