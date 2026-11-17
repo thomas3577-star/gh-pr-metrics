@@ -69,7 +69,8 @@ def main():
         print("Not in the saved data. Either it was last updated before history_start "
               f"({cfg['history_start']}), or it was created after the data was fetched.")
         return
-    print(f"{pr['title']}\n{pr['url']}\n")
+    author = (pr.get("author") or {}).get("login") or "ghost"
+    print(f"{pr['title']}\n{pr['url']}\nAuthor: {author}\n")
 
     reason = m.left_out_reason(pr, cfg)
     if reason:
@@ -100,13 +101,16 @@ def main():
     if not pr["mergedAt"]:
         print(f"  Closed         {local(pr['closedAt'])}")
 
-    author = (pr.get("author") or {}).get("login") or "ghost"
     counted = m.counted_reviews(pr, author, m.when(pr["mergedAt"]))
     print(f"\nReviews ({len(pr['reviews']['nodes'])} collected, {len(counted)} count)")
     for r in sorted(pr["reviews"]["nodes"], key=lambda r: r.get("submittedAt") or ""):
         who = (r.get("author") or {}).get("login") or "unknown"
+        if who == author:
+            who += " (author)"
+        elif (r.get("author") or {}).get("__typename") == "Bot":
+            who += " (bot)"
         mark = "counts" if any(r is c for c in counted) else "doesn't count"
-        print(f"  {local(r.get('submittedAt')):20}  {who:20} {r['state']:18} {mark}")
+        print(f"  {local(r.get('submittedAt')):20}  {who:38} {r['state']:18} {mark}")
     print(f"Rule ({where(m.counted_reviews)}): {rule(m.counted_reviews)}\n")
 
     print(f"Values (rules from {where(m.per_pr)})")

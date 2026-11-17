@@ -78,6 +78,23 @@ Reply in chat with, in this order:
 2. Any lines starting with `Note:`, as printed.
 3. Every report path printed by report.py (lines starting `Report:`), one per repo.
 
+# Questions about the numbers
+
+For questions about a metric or a PR (how it is calculated, why a value looks wrong,
+why a PR is or isn't counted, whether something was considered), don't fetch and don't
+ask for confirmation.
+
+- How a metric is defined: answer from `METRICS.md`.
+- About one PR: run `python scripts/explain.py --repo <owner/name> --pr <number>`, adding the same report option as the report being discussed. Explain its output in plain words. Quote values, dates and rules exactly as printed. If its "Data as of" is later than the report's, say the data has been refreshed since that report.
+- Don't work out gaps between times (for example "25 seconds later"). Give the times as printed.
+- If something isn't in the rules or the PR's details, say the metrics don't use it.
+  Never guess.
+- If the user disagrees with a rule rather than the data, say it's a rule choice and
+  they should raise it with the tool's owner.
+- To check a period's median or percentage: point them to the report's PR list. Filter
+  by period, tick Show calculation details, download the CSV, and use `=MEDIAN()` or
+  `=PERCENTILE.INC(range,0.75)` in Excel.
+
 # Finding logins
 
 If asked to find GitHub logins from people's names, run, for each name:
