@@ -43,7 +43,7 @@ PR_FIELDS = """
   }
   reviews(first: 100) {
     totalCount
-    nodes { state submittedAt author { login } }
+    nodes { state submittedAt author { login __typename } }
   }
 """
 

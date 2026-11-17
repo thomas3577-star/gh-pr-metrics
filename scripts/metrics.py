@@ -212,7 +212,10 @@ REF_SHA = re.compile(r"\b[0-9a-f]{7,40}\b")
 
 
 def find_reverted(all_prs):
-    """Keys of merged PRs that a later merged 'Revert...' PR points to (any author)."""
+    """Keys of PRs that were reverted. A PR counts as reverted if a later merged PR
+    whose `title` starts with "Revert" points to it, in the same repo, either by its
+    number (#123, in the revert's `title` or `body`) or by its merge commit
+    (`mergeCommit.oid`). The revert can be by anyone."""
     by_sha = {}
     for key, pr in all_prs.items():
         if pr.get("mergeCommit"):
@@ -234,8 +237,11 @@ def find_reverted(all_prs):
 
 
 def counted_reviews(pr, author, merged):
-    """Reviews that count: submitted, by a known reviewer other than the author, and
-    submitted by the time of merge (any time, if the PR isn't merged)."""
+    """The reviews that count. A review counts if it was submitted (`reviews.submittedAt`
+    is set), was written by someone other than the PR's author (`reviews.author.login`
+    is set and differs from `author.login`), and was submitted no later than the merge
+    (`mergedAt`). For a PR that isn't merged, a review at any time counts.
+    Ordinary comments are not reviews and are not collected from GitHub."""
     cutoff = merged or datetime.max.replace(tzinfo=timezone.utc)
     return [r for r in pr["reviews"]["nodes"]
             if r.get("submittedAt") and (r.get("author") or {}).get("login") not in (None, author)
@@ -243,6 +249,28 @@ def counted_reviews(pr, author, merged):
 
 
 def per_pr(key, pr, reverted):
+    """One PR's row of values. Times are in days, rounded to 2 decimals, and are only
+    calculated for merged PRs. A PR becomes ready for review at its first
+    ready-for-review event (`timelineItems.createdAt`), or when it was opened
+    (`createdAt`) if it was never a draft. One rule per value:
+    time_to_merge_days: the days from when the PR was opened (`createdAt`) until it
+        was merged (`mergedAt`).
+    draft_days: the days from when the PR was opened (`createdAt`) until it became
+        ready for review. 0 if it was never a draft.
+    wait_first_review_days: the days from when the PR became ready for review until
+        the first review that counts was submitted (`reviews.submittedAt`). Blank if no
+        review counts. Never below 0.
+    in_review_days: the days from the first review that counts until the last one
+        that approved (`reviews.state` is APPROVED). Blank if either is missing.
+        Never below 0.
+    wait_to_merge_days: the days from the last approval that counts until the PR was
+        merged (`mergedAt`). Blank if there was no approval.
+    size_lines: the lines added (`additions`) plus the lines deleted (`deletions`).
+    approved: yes if at least one review that counts approved (`reviews.state` is
+        APPROVED).
+    reverted: yes if a later merged PR undid this one (see find_reverted).
+    reviews_truncated: yes if the PR has more reviews (`reviews.totalCount`) than the
+        100 collected, so a later review may have been missed."""
     author = (pr.get("author") or {}).get("login") or "ghost"
     created, merged, closed = when(pr["createdAt"]), when(pr["mergedAt"]), when(pr["closedAt"])
     outcome = "merged" if merged else ("closed_unmerged" if closed else "open")
@@ -292,6 +320,9 @@ def per_pr(key, pr, reverted):
 # "never_reviewed" is a plain number.
 
 def spread(values):
+    """The median and the 75th percentile (the same as Excel's MEDIAN and
+    PERCENTILE.INC) of the values that exist, each rounded to 1 decimal, and how
+    many values there were."""
     values = sorted(v for v in values if v is not None)
     if not values:
         return {"median": None, "p75": None, "count": 0}
@@ -300,18 +331,21 @@ def spread(values):
 
 
 def share(hits, total):
+    """How many out of how many, as a whole-number percentage."""
     return {"count": hits, "of": total, "pct": round(100 * hits / total) if total else None}
 
 
 def open_at(row, moment):
-    """True if the PR was created before `moment` and not merged or closed before it."""
+    """True if the PR was open at `moment`: opened before it (`createdAt`), and not
+    merged or closed before it (`mergedAt`, `closedAt`)."""
     finished = when(row["merged"] or row["closed"])
     return when(row["created"]) < moment and (finished is None or finished >= moment)
 
 
 def assign_periods(rows, columns):
-    """Set each merged or closed PR's "column" to the period it was merged or closed in.
-    PRs outside every period, and open PRs, keep None and are left out of the PR list."""
+    """Set each merged or closed PR's "column" to its period: the one in which it was
+    merged (`mergedAt`), or closed without merging (`closedAt`). Open PRs, and PRs
+    merged or closed outside every period, get none and don't appear in the PR list."""
     for start, end, is_month in columns:
         name = label(start, end, is_month)
         for r in rows:
@@ -424,6 +458,18 @@ def plain_notes(n):
     return msgs
 
 
+def left_out_reason(pr, cfg):
+    """Why a PR is left out of the metrics, or None if it's counted. A PR is left out if
+    its author is a bot (`author.__typename` is Bot). If the config lists authors, a
+    PR is also left out when its author (`author.login`) isn't in that list."""
+    author = pr.get("author") or {}
+    if author.get("__typename") == "Bot":
+        return "bot"
+    if cfg["authors"] and (author.get("login") or "").lower() not in cfg["authors"]:
+        return "author not in the list"
+    return None
+
+
 def split_by_repo(all_prs, cfg, reverted, range_start, range_end):
     """Sort PRs by repo. Returns, per repo: the rows of PRs to report, and how many PRs
     by bots and by authors not in the config list were left out. Left-out PRs are only
@@ -440,10 +486,10 @@ def split_by_repo(all_prs, cfg, reverted, range_start, range_end):
         repo = key.split("#")[0]
         if repo not in rows:
             continue
-        author = pr.get("author") or {}
-        if author.get("__typename") == "Bot":
+        reason = left_out_reason(pr, cfg)
+        if reason == "bot":
             bots[repo] += in_range(pr)
-        elif cfg["authors"] and (author.get("login") or "").lower() not in cfg["authors"]:
+        elif reason:
             not_listed[repo] += in_range(pr)
         else:
             rows[repo].append(per_pr(key, pr, reverted))
