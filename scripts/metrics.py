@@ -168,8 +168,10 @@ def label(start, end, is_month):
 
 
 def choose_columns(cfg, args, now):
-    """List of (start, end, is_month) for the columns this report shows."""
+    """The columns this report shows, as a list of (start, end, is_month), and a note
+    naming what was asked for when the saved data can't cover all of it (else None)."""
     tz, first = cfg["tz"], midnight(cfg["history_start"], cfg["tz"])
+    short_note = None
     if args.date_from or args.date_to:
         if not (args.date_from and args.date_to):
             stop(2, "give both --from and --to, e.g. --from 2026-11-02 --to 2026-11-15")
@@ -183,7 +185,7 @@ def choose_columns(cfg, args, now):
         if start < first:
             stop(2, f"{a} is before history_start {cfg['history_start']}. Ask for a later date, "
                     "or set an earlier history_start and run a full fetch.")
-        return [(start - (end - start), start, False), (start, end, False)]
+        return [(start - (end - start), start, False), (start, end, False)], None
     groups = all_groups(cfg, now)
     if args.since_start:
         chosen = groups
@@ -195,12 +197,12 @@ def choose_columns(cfg, args, now):
         since = now - timedelta(weeks=n) if m[2].startswith("week") else months_shift(now, -n)
         chosen = [g for g in groups if g[1] > since]
         if since < first:
-            args.short_note = f"the last {n} {m[2]}"
+            short_note = f"the last {n} {m[2]}"
     else:
         chosen = groups[-cfg["show_last"]:]
         if len(chosen) < cfg["show_last"]:
-            args.short_note = f"{cfg['show_last']} periods"
-    return [(s, e, cfg["group_by"] == "month") for s, e in chosen]
+            short_note = f"{cfg['show_last']} periods"
+    return [(s, e, cfg["group_by"] == "month") for s, e in chosen], short_note
 
 
 # ---------- step 1: per PR ----------
@@ -231,18 +233,22 @@ def find_reverted(all_prs):
     return reverted
 
 
+def counted_reviews(pr, author, merged):
+    """Reviews that count: submitted, by a known reviewer other than the author, and
+    submitted by the time of merge (any time, if the PR isn't merged)."""
+    cutoff = merged or datetime.max.replace(tzinfo=timezone.utc)
+    return [r for r in pr["reviews"]["nodes"]
+            if r.get("submittedAt") and (r.get("author") or {}).get("login") not in (None, author)
+            and when(r["submittedAt"]) <= cutoff]
+
+
 def per_pr(key, pr, reverted):
     author = (pr.get("author") or {}).get("login") or "ghost"
     created, merged, closed = when(pr["createdAt"]), when(pr["mergedAt"]), when(pr["closedAt"])
     outcome = "merged" if merged else ("closed_unmerged" if closed else "open")
     ready_events = [when(n["createdAt"]) for n in pr["timelineItems"]["nodes"] if n]
     ready = min(ready_events) if ready_events else created
-
-    # Reviews by someone other than the author, submitted by the time of merge.
-    cutoff = merged or datetime.max.replace(tzinfo=timezone.utc)
-    others = [r for r in pr["reviews"]["nodes"]
-              if r.get("submittedAt") and (r.get("author") or {}).get("login") not in (None, author)
-              and when(r["submittedAt"]) <= cutoff]
+    others = counted_reviews(pr, author, merged)
     first_review = min((when(r["submittedAt"]) for r in others), default=None)
     approvals = [when(r["submittedAt"]) for r in others if r["state"] == "APPROVED"]
     last_approval = max(approvals, default=None)
@@ -297,21 +303,34 @@ def share(hits, total):
     return {"count": hits, "of": total, "pct": round(100 * hits / total) if total else None}
 
 
-def per_column(rows, columns, cfg, now):
-    first = midnight(cfg["history_start"], cfg["tz"])
-    out = []
+def open_at(row, moment):
+    """True if the PR was created before `moment` and not merged or closed before it."""
+    finished = when(row["merged"] or row["closed"])
+    return when(row["created"]) < moment and (finished is None or finished >= moment)
+
+
+def assign_periods(rows, columns):
+    """Set each merged or closed PR's "column" to the period it was merged or closed in.
+    PRs outside every period, and open PRs, keep None and are left out of the PR list."""
     for start, end, is_month in columns:
         name = label(start, end, is_month)
         for r in rows:
             t = when(r["merged"] or r["closed"])
             if r["outcome"] != "open" and start <= t < end:
                 r["column"] = name
+
+
+def per_column(rows, columns, cfg, now):
+    """Every measure for each column. Expects assign_periods() to have run first."""
+    first = midnight(cfg["history_start"], cfg["tz"])
+    out = []
+    for start, end, is_month in columns:
+        name = label(start, end, is_month)
         merged = [r for r in rows if r["column"] == name and r["outcome"] == "merged"]
         closed = [r for r in rows if r["column"] == name and r["outcome"] == "closed_unmerged"]
         in_progress = end > now
         age_at = now if in_progress else end
-        open_then = [r for r in rows if when(r["created"]) < age_at
-                     and not (when(r["merged"] or r["closed"]) or age_at) < age_at]
+        open_then = [r for r in rows if open_at(r, age_at)]
         out.append({
             "label": name, "start": start.date().isoformat(),
             "end": (end - timedelta(days=1)).date().isoformat(),
@@ -405,6 +424,32 @@ def plain_notes(n):
     return msgs
 
 
+def split_by_repo(all_prs, cfg, reverted, range_start, range_end):
+    """Sort PRs by repo. Returns, per repo: the rows of PRs to report, and how many PRs
+    by bots and by authors not in the config list were left out. Left-out PRs are only
+    counted if open now or merged/closed within the report's range."""
+    rows = {repo: [] for repo in cfg["repos"]}
+    bots = dict.fromkeys(cfg["repos"], 0)
+    not_listed = dict.fromkeys(cfg["repos"], 0)
+
+    def in_range(pr):
+        t = when(pr["mergedAt"] or pr["closedAt"])
+        return t is None or range_start <= t < range_end
+
+    for key, pr in all_prs.items():
+        repo = key.split("#")[0]
+        if repo not in rows:
+            continue
+        author = pr.get("author") or {}
+        if author.get("__typename") == "Bot":
+            bots[repo] += in_range(pr)
+        elif cfg["authors"] and (author.get("login") or "").lower() not in cfg["authors"]:
+            not_listed[repo] += in_range(pr)
+        else:
+            rows[repo].append(per_pr(key, pr, reverted))
+    return rows, bots, not_listed
+
+
 # ---------- main ----------
 
 def main():
@@ -424,40 +469,23 @@ def main():
     now = datetime.now(timezone.utc).astimezone(cfg["tz"])
     if midnight(cfg["history_start"], cfg["tz"]) > now:
         stop(2, f"history_start {cfg['history_start']} is in the future.")
-    columns = choose_columns(cfg, args, now)
+    columns, short_note = choose_columns(cfg, args, now)
     if not columns:
         stop(2, "no columns in that range. Try a longer --last or --since-start.")
 
     reverted = find_reverted(all_prs)  # within each repo, revert PRs by anyone
-    by_repo = {repo: {"rows": [], "bots": 0, "not_listed": 0} for repo in cfg["repos"]}
-    range_start, range_end = columns[0][0], columns[-1][1]
-
-    def in_range(pr):
-        """Open now, or merged/closed within the periods this report shows."""
-        t = when(pr["mergedAt"] or pr["closedAt"])
-        return t is None or range_start <= t < range_end
-
-    for key, pr in all_prs.items():
-        bucket = by_repo.get(key.split("#")[0])
-        if bucket is None:
-            continue
-        author = pr.get("author") or {}
-        if author.get("__typename") == "Bot":
-            bucket["bots"] += in_range(pr)
-        elif cfg["authors"] and (author.get("login") or "").lower() not in cfg["authors"]:
-            bucket["not_listed"] += in_range(pr)
-        else:
-            bucket["rows"].append(per_pr(key, pr, reverted))
+    rows_by_repo, bots, not_listed = split_by_repo(all_prs, cfg, reverted,
+                                                   columns[0][0], columns[-1][1])
 
     # A login is only flagged if it has no PRs in any repo.
-    found = {r["author"].lower() for b in by_repo.values() for r in b["rows"]}
+    found = {r["author"].lower() for rows in rows_by_repo.values() for r in rows}
     missing = sorted(set(cfg["authors"]) - found)
     run_dir = Path(args.out_dir) / now.strftime("%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     print("PR metrics")
 
-    for repo, b in by_repo.items():
-        rows = b["rows"]
+    for repo, rows in rows_by_repo.items():
+        assign_periods(rows, columns)
         cols = per_column(rows, columns, cfg, now)
         compared = add_markers(cols)
         activity = spread(days(when(r["updated"]), now) for r in rows if r["outcome"] == "open")
@@ -473,11 +501,11 @@ def main():
             "data_as_of": meta[repo]["last_success_started_at"], "host": meta[repo]["host"],
             "authors": cfg["authors"] or "everyone", "scope": scope,
             "utc_offset": cfg["utc_offset"], "compared": compared,
-            "bot_prs_left_out": b["bots"], "unlisted_author_prs_left_out": b["not_listed"],
+            "bot_prs_left_out": bots[repo], "unlisted_author_prs_left_out": not_listed[repo],
             "partial_columns": [c["label"] for c in cols if c["partial"]],
             "reviews_cut_at_100": [r["key"] for r in shown if r["reviews_truncated"]],
             "authors_with_no_prs": missing,
-            "short_note": getattr(args, "short_note", None),
+            "short_note": short_note,
             "history_start": cfg["history_start"].isoformat(),
         }
         notes["messages"] = plain_notes(notes)
