@@ -58,16 +58,36 @@ select{font-size:13px;margin:0 16px 8px 6px}a{color:#1a5fb4}
 """
 
 FILTER_JS = """
-function f(){var c=document.getElementById('fc').value,a=document.getElementById('fa').value,
-s=document.getElementById('fs').value;
-document.querySelectorAll('#prs tr[data-c]').forEach(function(r){
-r.style.display=((c==='all'||r.dataset.c===c)&&(a==='all'||r.dataset.a===a)
-&&(s==='all'||r.dataset.s===s))?'':'none';});}
-function csv(){var out=[];document.querySelectorAll('#prs tr').forEach(function(r){
-if(r.style.display==='none')return;var cells=[];r.querySelectorAll('th,td').forEach(function(c){
-cells.push('"'+c.textContent.replace(/"/g,'""')+'"');});out.push(cells.join(','));});
-var b=new Blob(['\\ufeff'+out.join('\\r\\n')],{type:'text/csv'}),l=document.createElement('a');
-l.href=URL.createObjectURL(b);l.download=document.title.replace(/[^\\w-]+/g,'-')+'.csv';l.click();}
+// Show only the PR rows that match the Period, Author and Status filters.
+function f() {
+  var c = document.getElementById('fc').value,
+      a = document.getElementById('fa').value,
+      s = document.getElementById('fs').value;
+  document.querySelectorAll('#prs tr[data-c]').forEach(function (r) {
+    var show = (c === 'all' || r.dataset.c === c)
+            && (a === 'all' || r.dataset.a === a)
+            && (s === 'all' || r.dataset.s === s);
+    r.style.display = show ? '' : 'none';
+  });
+}
+
+// Download the visible rows (header included) as a CSV file that Excel opens correctly.
+function csv() {
+  var out = [];
+  document.querySelectorAll('#prs tr').forEach(function (r) {
+    if (r.style.display === 'none') return;
+    var cells = [];
+    r.querySelectorAll('th,td').forEach(function (c) {
+      cells.push('"' + c.textContent.replace(/"/g, '""') + '"');
+    });
+    out.push(cells.join(','));
+  });
+  var b = new Blob(['\\ufeff' + out.join('\\r\\n')], {type: 'text/csv'}),
+      l = document.createElement('a');
+  l.href = URL.createObjectURL(b);
+  l.download = document.title.replace(/[^\\w-]+/g, '-') + '.csv';
+  l.click();
+}
 """
 
 
