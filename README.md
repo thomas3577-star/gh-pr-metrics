@@ -15,6 +15,11 @@ flowchart LR
     D --> M[metrics.py]
     M --> R[report.py]
     R --> H([report per repo<br/>.html])
+    U -->|"Why is PR #123 …?"| A
+    A --> E[explain.py]
+    D --> E
+    M -.->|rules| E
+    E --> P([plain-English answer])
 ```
 
 ## Start in 3 steps
@@ -48,6 +53,19 @@ Each repo gets its own report. Open `output/<date-time>/report-<owner>-<name>.ht
 **To check a number:** tick **Show calculation details** to see each PR's times.
 Pick a period, click **Download shown rows as CSV**, and open it in Excel.
 
+## Ask about a number
+
+Ask the agent in Copilot Chat, for example:
+
+- "Why is owner/repo #123's waiting for first review 1.97 days?"
+- "Why isn't #456 counted?"
+- "Did it consider CI results for #123?"
+
+It answers from that PR's saved data and the rules in `metrics.py`, without fetching.
+Without Copilot, run `python scripts/explain.py --repo owner/repo --pr 123`
+(add the same option as the report, e.g. `--since-start`).
+If you disagree with a rule itself, the rules are in [METRICS.md](METRICS.md): raise it with the tool's owner.
+
 ## If it stops
 
 | Message                                    | Do this                                                                      |
@@ -67,9 +85,12 @@ gh-pr-metrics/
 ├── scripts/
 │   ├── fetch.py      gets PRs from GitHub (gh CLI)
 │   ├── metrics.py    calculates every number in METRICS.md
-│   └── report.py     builds one HTML report per repo
+│   ├── report.py     builds one HTML report per repo
+│   ├── explain.py    explains one PR's numbers in plain English
+│   └── check_same.py confirms a code change left the results unchanged
 ├── METRICS.md        what every number means, with sources
 ├── COMPARISON.md     what's improved over pr-metrics-agent
+├── docs/             maintainability baselines and reviews
 ├── pr-metrics.config.sample.toml   settings template
 ├── pr-metrics.config.toml   your settings      (never committed)
 ├── data/                    saved PRs per repo (never committed)
