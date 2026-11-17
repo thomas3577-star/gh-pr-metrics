@@ -113,6 +113,7 @@ def load_data(data_dir, repos):
     """Saved data for the configured repos: all PRs together, plus each repo's own details."""
     all_prs, meta = {}, {}
     for repo in repos:
+        # Same file name as fetch.py's repo_file(): change both together.
         path = Path(data_dir) / f"prs-{repo.replace('/', '-')}.json"
         try:
             d = json.loads(path.read_text(encoding="utf-8"))
@@ -277,6 +278,12 @@ def per_pr(key, pr, reverted):
 
 
 # ---------- step 2: per column ----------
+# Each measure in a column takes one of three shapes, which headline() and cell()
+# here, and cell() in report.py, tell apart by their keys:
+#   spread(): {"median", "p75", "count"}   times and sizes
+#   share():  {"count", "of", "pct"}       percentages
+#   {"value": n}                           a plain count (open PRs at period end)
+# "never_reviewed" is a plain number.
 
 def spread(values):
     values = sorted(v for v in values if v is not None)
