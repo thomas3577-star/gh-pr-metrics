@@ -10,7 +10,7 @@ Evaluate how well a team's pull requests (PRs) move through review, whether merg
 
 ## Who and what is counted
 
-- **People:** only the GitHub logins listed under `authors` in the config; everyone if the list is empty. Bot accounts are never counted.
+- **People:** only the GitHub logins listed under `authors` in the config; everyone if the list is empty. Bot accounts are never counted, as PR authors or as reviewers.
 - **Repos:** only the repos listed under `repos`. Each repo is reported separately; numbers are never combined across repos.
 - **Periods:** results are shown per period (1 week, 2 weeks or a calendar month, set in the config), labelled by date; the latest may be in progress.
 - **Which period a PR counts in:** the period it was merged in (or closed, if closed without merging). Questions 1 to 5 use PRs merged in the period.
@@ -33,7 +33,7 @@ Evaluate how well a team's pull requests (PRs) move through review, whether merg
 | Stage | From | To |
 |---|---|---|
 | Draft | PR opened | Marked ready for review (zero if never a draft) |
-| Waiting for first review | Ready for review | First review by someone other than the author |
+| Waiting for first review | Ready for review | First review by a person other than the author (reviews by bots, such as Copilot, don't count) |
 | In review | First review | Last approval |
 | Waiting to merge | Last approval | Merged |
 
@@ -75,3 +75,4 @@ Evaluate how well a team's pull requests (PRs) move through review, whether merg
 | Date | Version | Change | Why |
 |---|---|---|---|
 | 2026-11-16 | 1 | First version: six questions, results per period, listed authors (or everyone), bots never counted. Thresholds only where a current, referenced study exists | New product: evaluate a named team across repos |
+| 2026-11-17 | 2 | Reviews and approvals by bots (such as Copilot) no longer count | Matches the original intent; automated reviews made human review look instant |

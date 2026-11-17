@@ -238,13 +238,15 @@ def find_reverted(all_prs):
 
 def counted_reviews(pr, author, merged):
     """The reviews that count. A review counts if it was submitted (`reviews.submittedAt`
-    is set), was written by someone other than the PR's author (`reviews.author.login`
-    is set and differs from `author.login`), and was submitted no later than the merge
-    (`mergedAt`). For a PR that isn't merged, a review at any time counts.
-    Ordinary comments are not reviews and are not collected from GitHub."""
+    is set), was written by a person (`reviews.author.__typename` is not Bot, so
+    automated reviewers such as Copilot don't count) other than the PR's author
+    (`reviews.author.login` is set and differs from `author.login`), and was submitted
+    no later than the merge (`mergedAt`). For a PR that isn't merged, a review at any
+    time counts. Ordinary comments are not reviews and are not collected from GitHub."""
     cutoff = merged or datetime.max.replace(tzinfo=timezone.utc)
     return [r for r in pr["reviews"]["nodes"]
             if r.get("submittedAt") and (r.get("author") or {}).get("login") not in (None, author)
+            and (r.get("author") or {}).get("__typename") != "Bot"
             and when(r["submittedAt"]) <= cutoff]
 
 
