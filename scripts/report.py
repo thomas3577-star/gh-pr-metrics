@@ -80,10 +80,15 @@ def e(text):
     return html.escape(str(text))
 
 
-def local_time(iso, offset):
+def tz_from_offset(offset):
+    """Time zone for an offset written like "+05:30"."""
     sign = 1 if offset[0] == "+" else -1
-    tz = timezone(sign * timedelta(hours=int(offset[1:3]), minutes=int(offset[4:6])))
-    return datetime.fromisoformat(iso).astimezone(tz).strftime(f"%d %b %Y, %H:%M (UTC{offset})")
+    return timezone(sign * timedelta(hours=int(offset[1:3]), minutes=int(offset[4:6])))
+
+
+def local_time(iso, offset):
+    return datetime.fromisoformat(iso).astimezone(tz_from_offset(offset)).strftime(
+        f"%d %b %Y, %H:%M (UTC{offset})")
 
 
 def cell(m):
@@ -120,9 +125,7 @@ def column_table(cols, rows, current_activity, extra_row=False):
 def fmt_time(iso, offset):
     if not iso:
         return ""
-    sign = 1 if offset[0] == "+" else -1
-    tz = timezone(sign * timedelta(hours=int(offset[1:3]), minutes=int(offset[4:6])))
-    return datetime.fromisoformat(iso).astimezone(tz).strftime("%Y-%m-%d %H:%M")
+    return datetime.fromisoformat(iso).astimezone(tz_from_offset(offset)).strftime("%Y-%m-%d %H:%M")
 
 
 def fmt_days(v):
