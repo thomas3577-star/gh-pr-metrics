@@ -21,25 +21,28 @@ LINKS = {
     "Google review guidance": "https://google.github.io/eng-practices/review/developer/small-cls.html",
 }
 
+# Each section: question, its rows (label, measure key), and any extras:
+# "benchmark" adds the PR size benchmark line; "activity_row" adds the
+# time-since-last-activity row for open PRs.
 SECTIONS = [
     ("1. How long does a PR take to merge?", [
-        ("Time to merge", "time_to_merge_days")]),
+        ("Time to merge", "time_to_merge_days")], set()),
     ("2. Where do PRs spend the most time?", [
         ("Draft", "stage_draft_days"),
         ("Waiting for first review", "stage_wait_first_review_days"),
         ("In review", "stage_in_review_days"),
         ("Waiting to merge", "stage_wait_to_merge_days"),
-        ("Never formally reviewed", "never_reviewed")]),
+        ("Never formally reviewed", "never_reviewed")], set()),
     ("3. Are reviews skipped?", [
-        ("Merged without approval", "merged_without_approval")]),
+        ("Merged without approval", "merged_without_approval")], set()),
     ("4. Are merged changes stable?", [
-        ("Reverted (minimum)", "reverted_minimum")]),
+        ("Reverted (minimum)", "reverted_minimum")], set()),
     ("5. Are PRs small enough to review well?", [
-        ("Lines changed", "size_lines")]),
+        ("Lines changed", "size_lines")], {"benchmark"}),
     ("6. Is unfinished work piling up?", [
         ("Open PRs at period end", "open_prs_at_end"),
         ("Open PR age at period end", "open_pr_age_days"),
-        ("Closed without merging", "closed_without_merging")]),
+        ("Closed without merging", "closed_without_merging")], {"activity_row"}),
 ]
 
 CSS = """
@@ -185,11 +188,11 @@ def build_page(res, run_dir):
         f'Data as of {e(local_time(n["data_as_of"], n["utc_offset"]))} · Run {e(run_dir.name)}</p>',
         f'<p class="m">{e(legend)}</p>',
     ]
-    for title, rows in SECTIONS:
+    for title, rows, extras in SECTIONS:
         parts.append(f"<h2>{e(title)}</h2>")
         parts.append(column_table(cols, rows, summ["current_time_since_last_activity_days"],
-                                  extra_row=title.startswith("6.")))
-        if title.startswith("5."):
+                                  extra_row="activity_row" in extras))
+        if "benchmark" in extras:
             links = "; ".join(f'<a href="{u}">{e(t)}</a>' for t, u in LINKS.items())
             parts.append(f'<p class="m">Benchmark: elite teams\' PRs are under '
                          f'{summ["elite_pr_lines"]} lines ({links}). A comparison, not a pass or fail.</p>')
