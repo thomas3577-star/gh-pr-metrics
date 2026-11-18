@@ -237,18 +237,30 @@ def find_reverted(all_prs):
     return reverted
 
 
+def review_decision(review, author, merged):
+    """Why a review doesn't count, or None if it counts. A review counts if it was
+    submitted (`reviews.submittedAt` is set), by a known reviewer (`reviews.author.login`)
+    who isn't the PR's author (`author.login`) and isn't a bot (`reviews.author.__typename`
+    is not Bot, so automated reviewers such as Copilot don't count), no later than the
+    merge (`mergedAt`). For a PR that isn't merged, a review at any time counts.
+    Ordinary comments are not reviews and are not collected from GitHub."""
+    who = review.get("author") or {}
+    if not review.get("submittedAt"):
+        return "not submitted"
+    if who.get("login") is None:
+        return "reviewer unknown"
+    if who["login"] == author:
+        return "by the PR's author"
+    if who.get("__typename") == "Bot":
+        return "by a bot"
+    if merged and when(review["submittedAt"]) > merged:
+        return "after the merge"
+    return None
+
+
 def counted_reviews(pr, author, merged):
-    """The reviews that count. A review counts if it was submitted (`reviews.submittedAt`
-    is set), was written by a person (`reviews.author.__typename` is not Bot, so
-    automated reviewers such as Copilot don't count) other than the PR's author
-    (`reviews.author.login` is set and differs from `author.login`), and was submitted
-    no later than the merge (`mergedAt`). For a PR that isn't merged, a review at any
-    time counts. Ordinary comments are not reviews and are not collected from GitHub."""
-    cutoff = merged or datetime.max.replace(tzinfo=timezone.utc)
-    return [r for r in pr["reviews"]["nodes"]
-            if r.get("submittedAt") and (r.get("author") or {}).get("login") not in (None, author)
-            and (r.get("author") or {}).get("__typename") != "Bot"
-            and when(r["submittedAt"]) <= cutoff]
+    """The reviews that count (see review_decision)."""
+    return [r for r in pr["reviews"]["nodes"] if review_decision(r, author, merged) is None]
 
 
 def per_pr(key, pr, reverted):
@@ -279,6 +291,9 @@ def per_pr(key, pr, reverted):
     outcome = "merged" if merged else ("closed_unmerged" if closed else "open")
     ready_events = [when(n["createdAt"]) for n in pr["timelineItems"]["nodes"] if n]
     ready = min(ready_events) if ready_events else created
+    reviews = [{"at": r.get("submittedAt"), "by": (r.get("author") or {}).get("login"),
+                "state": r["state"], "why_not_counted": review_decision(r, author, merged)}
+               for r in sorted(pr["reviews"]["nodes"], key=lambda r: r.get("submittedAt") or "")]
     others = counted_reviews(pr, author, merged)
     first_review = min((when(r["submittedAt"]) for r in others), default=None)
     approvals = [when(r["submittedAt"]) for r in others if r["state"] == "APPROVED"]
@@ -295,6 +310,8 @@ def per_pr(key, pr, reverted):
         "in_review_days": None, "wait_to_merge_days": None,
         "approved": bool(last_approval), "reverted": key in reverted,
         "reviews_truncated": pr["reviews"]["totalCount"] > len(pr["reviews"]["nodes"]),
+        "ready_from": "first ready-for-review event" if ready_events else "opened (never a draft)",
+        "reviews": reviews,
     }
     if merged:
         row["time_to_merge_days"] = days(created, merged)
