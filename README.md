@@ -85,6 +85,32 @@ If you disagree with a rule itself, the rules are in [METRICS.md](METRICS.md): r
 | … is before history_start                  | Ask for later dates, or set an earlier `history_start` and do a full refresh |
 | No PRs found for login(s)                  | Check those logins in the config                                             |
 
+## Changing the scripts
+
+Only needed if you edit the Python files in `scripts/`. If you just run reports, skip this.
+
+**Why:** a small code change can quietly change a number in the report, with no error.
+`check_same.py` catches that.
+
+**How it works:** it keeps a copy of the current results, called the reference. After
+you change the code, it produces the results again from the same saved data and tells
+you whether anything differs.
+
+**Steps:**
+1. Before you edit any script, save the current results as the reference:
+   `python scripts/check_same.py save`
+2. Make your change.
+3. Check what changed:
+   `python scripts/check_same.py compare`
+   - `SAME` means every number, report and message is unchanged. Safe to commit.
+   - `DIFFERENT` lists the files your change altered. If you didn't mean to change
+     results, undo your change.
+4. If you meant to change results (for example, a new rule), or you've fetched new
+   data, run `save` again so later checks compare against the new results.
+
+It checks `metrics.py` and `report.py`. It can't check `fetch.py`, which downloads from
+GitHub, where the data is different every time.
+
 ## Project structure
 
 ```
@@ -95,7 +121,7 @@ gh-pr-metrics/
 │   ├── metrics.py    calculates every number in METRICS.md
 │   ├── report.py     builds one HTML report per repo
 │   ├── explain.py    explains one PR's numbers in plain English
-│   └── check_same.py confirms a code change left the results unchanged
+│   └── check_same.py for whoever changes the scripts (see Changing the scripts)
 ├── METRICS.md        what every number means, with sources
 ├── COMPARISON.md     what's improved over pr-metrics-agent
 ├── docs/             maintainability baselines and reviews
