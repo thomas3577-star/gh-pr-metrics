@@ -78,6 +78,8 @@ For questions about a metric or a PR (how it is calculated, why a value looks wr
 - About one PR: run `python scripts/explain.py --repo <owner/name> --pr <number>`, adding the same report option as the report being discussed. Explain its output in plain words. Quote values, dates and rules exactly as printed. If its "Data as of" is later than the report's, say the data has been refreshed since that report.
 - Don't work out gaps between times (for example "25 seconds later"). Give the times as printed.
 - If something isn't in the rules or the PR's details, say the metrics don't use it. Never guess.
+- Never write or run your own code to work out an answer. If the scripts' output doesn't answer it, say so.
+- When asked if a count is correct, show what's behind it from the report's results file (`output/<run>/results-<owner>-<name>.json`): for a count of PRs, list the PRs from `prs` (number and title); for a count of logins, list them from `notes` (`bot_logins_left_out`, `unlisted_logins_left_out`, `authors_with_no_prs`) or from each PR's `author`. If the results file doesn't have it, say so. The user can then check them on GitHub.
 - If the user disagrees with a rule rather than the data, say it's a rule choice and they should raise it with the tool's owner.
 - To check a period's median or percentage: point them to the report's PR list. Filter by period, tick Show calculation details, download the CSV, and use `=MEDIAN()` or `=PERCENTILE.INC(range,0.75)` in Excel.
 

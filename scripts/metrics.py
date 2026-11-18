@@ -26,6 +26,7 @@ import re
 import statistics
 import sys
 import tomllib
+from collections import Counter
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 
@@ -455,9 +456,22 @@ def plain_notes(n):
     if n["partial_columns"]:
         msgs.append("Column(s) " + ", ".join(n["partial_columns"]) + " start before history_start, "
                     "so only part of that time is counted.")
-    msgs.append(f"Not counted: {prs(n['bot_prs_left_out'])} by bots and "
-                f"{prs(n['unlisted_author_prs_left_out'])} by people not in the list.")
+    msgs.append(f"Not counted: {prs(n['bot_prs_left_out'])} by bots"
+                f"{by_login(n['bot_logins_left_out'])} and "
+                f"{prs(n['unlisted_author_prs_left_out'])} by people not in the list"
+                f"{by_login(n['unlisted_logins_left_out'])}.")
     return msgs
+
+
+def by_login(counts, shown=5):
+    """ " (dependabot 9, github-actions 2)" for the logins with the most PRs, up to
+    `shown` of them, then "+N more"; empty when there are none."""
+    if not counts:
+        return ""
+    items = [f"{login} {n}" for login, n in list(counts.items())[:shown]]
+    if len(counts) > shown:
+        items.append(f"+{len(counts) - shown} more")
+    return f" ({', '.join(items)})"
 
 
 def left_out_reason(pr, cfg):
@@ -474,11 +488,11 @@ def left_out_reason(pr, cfg):
 
 def split_by_repo(all_prs, cfg, reverted, range_start, range_end):
     """Sort PRs by repo. Returns, per repo: the rows of PRs to report, and how many PRs
-    by bots and by authors not in the config list were left out. Left-out PRs are only
-    counted if open now or merged/closed within the report's range."""
+    by bots and by authors not in the config list were left out, by login. Left-out PRs
+    are only counted if open now or merged/closed within the report's range."""
     rows = {repo: [] for repo in cfg["repos"]}
-    bots = dict.fromkeys(cfg["repos"], 0)
-    not_listed = dict.fromkeys(cfg["repos"], 0)
+    bots = {repo: Counter() for repo in cfg["repos"]}        # login -> PRs left out
+    not_listed = {repo: Counter() for repo in cfg["repos"]}
 
     def in_range(pr):
         t = when(pr["mergedAt"] or pr["closedAt"])
@@ -489,10 +503,10 @@ def split_by_repo(all_prs, cfg, reverted, range_start, range_end):
         if repo not in rows:
             continue
         reason = left_out_reason(pr, cfg)
-        if reason == "bot":
-            bots[repo] += in_range(pr)
-        elif reason:
-            not_listed[repo] += in_range(pr)
+        login = (pr.get("author") or {}).get("login") or "unknown"
+        if reason:
+            if in_range(pr):
+                (bots if reason == "bot" else not_listed)[repo][login] += 1
         else:
             rows[repo].append(per_pr(key, pr, reverted))
     return rows, bots, not_listed
@@ -549,7 +563,10 @@ def main():
             "data_as_of": meta[repo]["last_success_started_at"], "host": meta[repo]["host"],
             "authors": cfg["authors"] or "everyone", "scope": scope,
             "utc_offset": cfg["utc_offset"], "compared": compared,
-            "bot_prs_left_out": bots[repo], "unlisted_author_prs_left_out": not_listed[repo],
+            "bot_prs_left_out": sum(bots[repo].values()),
+            "unlisted_author_prs_left_out": sum(not_listed[repo].values()),
+            "bot_logins_left_out": dict(bots[repo].most_common()),
+            "unlisted_logins_left_out": dict(not_listed[repo].most_common()),
             "partial_columns": [c["label"] for c in cols if c["partial"]],
             "reviews_cut_at_100": [r["key"] for r in shown if r["reviews_truncated"]],
             "authors_with_no_prs": missing,
