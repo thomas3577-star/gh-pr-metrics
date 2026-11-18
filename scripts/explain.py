@@ -1,22 +1,24 @@
-"""Explain one PR's metrics in plain English: whether it is counted, which period it
-falls in, the times and reviews used, each value and the rule behind it, and where
-each rule lives in metrics.py.
+"""Explain one PR in a report, in plain English, from that report's own results file:
+whether it was counted, which period it fell in, its times, each review and why it
+did or didn't count, each value with its rule, and where each rule lives in metrics.py.
 
-Usage (from the repo folder; range options are the same as metrics.py):
+Usage (from the repo folder):
   python scripts/explain.py --repo cli/cli --pr 14815
-  python scripts/explain.py --repo cli/cli --pr 14815 --last "3 months"
+  python scripts/explain.py --repo cli/cli --pr 14815 --run output/20261118-092624
 
-Read-only: uses the saved data in data/, never contacts GitHub, writes nothing.
-The rules are the docstrings of the functions in metrics.py, so they change with the code.
+Without --run, it uses the newest report run in output/.
+Read-only: recalculates nothing, never contacts GitHub, writes nothing.
 """
 
 import argparse
 import inspect
+import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime
 from pathlib import Path
 
 import metrics as m
+from report import tz_from_offset
 
 
 def where(func):
@@ -30,99 +32,78 @@ def rule(func):
     return " ".join(inspect.getdoc(func).split())
 
 
-def value_rules():
-    """Each value's rule, from the "name: rule" lines in per_pr's docstring."""
-    rules, name = {}, None
-    for line in inspect.getdoc(m.per_pr).splitlines():
-        head, _, text = line.partition(": ")
-        if text and head.isidentifier() and not line.startswith(" "):
-            name = head
-            rules[name] = text.strip()
-        elif name and line.startswith(" "):
-            rules[name] += " " + line.strip()
-    return rules
+def newest_run(slug):
+    """The newest output/YYYYMMDD-HHMMSS folder that has this repo's results."""
+    runs = sorted(p.parent for p in Path("output").glob(f"*/results-{slug}.json")
+                  if p.parent.name[:8].isdigit())
+    if not runs:
+        m.stop(2, f"no report found in output/ for this repo. Run the report first.")
+    return runs[-1]
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Explain one PR's metrics in plain English.")
-    ap.add_argument("--repo", required=True, help="owner/name, as in the config")
+    ap = argparse.ArgumentParser(description="Explain one PR in a report, in plain English.")
+    ap.add_argument("--repo", required=True, help="owner/name")
     ap.add_argument("--pr", required=True, type=int, help="PR number")
-    ap.add_argument("--since-start", action="store_true")
-    ap.add_argument("--last", help='e.g. "6 weeks" or "3 months"')
-    ap.add_argument("--from", dest="date_from")
-    ap.add_argument("--to", dest="date_to")
-    ap.add_argument("--config", default="pr-metrics.config.toml")
-    ap.add_argument("--data-dir", default="data")
+    ap.add_argument("--run", help="report run folder, e.g. output/20261118-092624 (default: newest)")
     args = ap.parse_args()
 
-    cfg = m.load_config(args.config)
-    if args.repo not in cfg["repos"]:
-        m.stop(2, f"{args.repo} is not in the config's repos.")
-    all_prs, meta = m.load_data(args.data_dir, [args.repo])
-    key = f"{args.repo}#{args.pr}"
-    tz = cfg["tz"]
-    local = lambda iso: m.when(iso).astimezone(tz).strftime("%d %b %Y %H:%M:%S") if iso else "none"
-    print(f"{key}")
-    print(f"Data as of {local(meta[args.repo]['last_success_started_at'])} (UTC{cfg['utc_offset']}).")
-    pr = all_prs.get(key)
-    if pr is None:
-        print("Not in the saved data. Either it was last updated before history_start "
-              f"({cfg['history_start']}), or it was created after the data was fetched.")
-        return
-    author = (pr.get("author") or {}).get("login") or "ghost"
-    print(f"{pr['title']}\n{pr['url']}\nAuthor: {author}\n")
+    slug = args.repo.replace("/", "-")
+    run = Path(args.run) if args.run else newest_run(slug)
+    path = run / f"results-{slug}.json"
+    if not path.exists():
+        m.stop(2, f"{path} not found.")
+    res = json.loads(path.read_text(encoding="utf-8"))
+    if "left_out" not in res:
+        m.stop(2, f"{path} was made before reports recorded their decisions. Run the report again.")
+    notes, key = res["notes"], f"{args.repo}#{args.pr}"
+    offset = notes["utc_offset"]
+    tz = tz_from_offset(offset)
+    local = lambda iso: (datetime.fromisoformat(iso).astimezone(tz).strftime("%d %b %Y %H:%M:%S")
+                         if iso else "none")
 
-    reason = m.left_out_reason(pr, cfg)
-    if reason:
-        print(f"NOT COUNTED: {reason}.")
+    print(f"{key}, in report {run.as_posix()}")
+    print(f"Report covers {notes['scope']}. Data as of {local(notes['data_as_of'])} (UTC{offset}).")
+    row = next((r for r in res["prs"] if r["key"] == key), None)
+    out = next((r for r in res.get("left_out", []) if r["key"] == key), None)
+
+    if out:
+        print(f"{out['title']}\n{out['url']}\nAuthor: {out['author']}\n")
+        print(f"NOT COUNTED: {out['reason']}.")
         print(f"Rule ({where(m.left_out_reason)}): {rule(m.left_out_reason)}")
         return
+    if row is None:
+        print("\nNot in this report. It was not merged, closed or still open within the "
+              "report's range, or it is not in the saved data.")
+        return
 
-    now = datetime.now(timezone.utc).astimezone(tz)
-    columns, _ = m.choose_columns(cfg, args, now)
-    row = m.per_pr(key, pr, m.find_reverted(all_prs))
-    m.assign_periods([row], columns)
-    first, last = m.label(*columns[0]), m.label(*columns[-1])
-    print(f"Report range: {first} to {last}.")
+    print(f"{row['title']}\n{row['url']}\nAuthor: {row['author']}\n")
     if row["column"]:
         print(f"Counted in period {row['column']} ({row['outcome'].replace('_', ' ')}).")
-    elif row["outcome"] == "open":
-        print("Still open: it appears in the open PR counts and ages, not in any period's times.")
     else:
-        print(f"{row['outcome'].replace('_', ' ').capitalize()} outside the report range, "
-              "so it is not in any period.")
+        print("Still open: it appears in the open PR counts and ages, not in any period's times.")
     print(f"Rule ({where(m.assign_periods)}): {rule(m.assign_periods)}\n")
 
-    print(f"Times (UTC{cfg['utc_offset']})")
-    print(f"  Opened         {local(pr['createdAt'])}")
-    events = [n["createdAt"] for n in pr["timelineItems"]["nodes"] if n]
-    print(f"  Ready          {local(min(events)) if events else local(pr['createdAt']) + ' (never a draft: opened time used)'}")
-    print(f"  Merged         {local(pr['mergedAt'])}")
-    if not pr["mergedAt"]:
-        print(f"  Closed         {local(pr['closedAt'])}")
+    print(f"Times (UTC{offset})")
+    print(f"  Opened         {local(row['created'])}")
+    print(f"  Ready          {local(row['ready_at'] or row['created'])}  (taken from {row['ready_from']})")
+    print(f"  First review   {local(row['first_review_at'])}")
+    print(f"  Last approval  {local(row['last_approval_at'])}")
+    print(f"  Merged         {local(row['merged'])}")
+    if not row["merged"]:
+        print(f"  Closed         {local(row['closed'])}")
 
-    counted = m.counted_reviews(pr, author, m.when(pr["mergedAt"]))
-    print(f"\nReviews ({len(pr['reviews']['nodes'])} collected, {len(counted)} count)")
-    for r in sorted(pr["reviews"]["nodes"], key=lambda r: r.get("submittedAt") or ""):
-        who = (r.get("author") or {}).get("login") or "unknown"
-        if who == author:
-            who += " (author)"
-        elif (r.get("author") or {}).get("__typename") == "Bot":
-            who += " (bot)"
-        mark = "counts" if any(r is c for c in counted) else "doesn't count"
-        print(f"  {local(r.get('submittedAt')):20}  {who:38} {r['state']:18} {mark}")
-    print(f"Rule ({where(m.counted_reviews)}): {rule(m.counted_reviews)}\n")
+    print(f"\nReviews ({len(row['reviews'])} collected)")
+    for r in row["reviews"]:
+        verdict = "counts" if r["why_not_counted"] is None else f"doesn't count: {r['why_not_counted']}"
+        print(f"  {local(r['at']):20}  {r['by'] or 'unknown':30} {r['state']:18} {verdict}")
+    print(f"Rule ({where(m.review_decision)}): {rule(m.review_decision)}\n")
 
-    print(f"Values (rules from {where(m.per_pr)})")
-    rules = value_rules()
-    shown = {"key", "url", "title", "author", "outcome", "created", "merged", "closed",
-             "updated", "column", "ready_at", "first_review_at", "last_approval_at"}
-    for name, value in row.items():
-        if name in shown:
-            continue
-        value = "blank" if value is None else ("yes" if value is True else "no" if value is False else value)
-        print(f"  {name:24} {value}")
-        print(f"      {rules.get(name, 'No rule written for this value in per_pr.')}")
+    print(f"Values (rules from {where(m.per_pr)}, VALUE_RULES)")
+    for name, text in m.VALUE_RULES.items():
+        value = row[name]
+        value = "blank" if value is None else "yes" if value is True else "no" if value is False else value
+        print(f"  {name:24} {value}\n      {text}")
 
 
 if __name__ == "__main__":

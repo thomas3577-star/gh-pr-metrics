@@ -263,29 +263,33 @@ def counted_reviews(pr, author, merged):
     return [r for r in pr["reviews"]["nodes"] if review_decision(r, author, merged) is None]
 
 
+# Each value in a PR's row, with its rule in plain English. explain.py prints these.
+VALUE_RULES = {
+    "time_to_merge_days": "the days from when the PR was opened (`createdAt`) until it "
+                          "was merged (`mergedAt`).",
+    "draft_days": "the days from when the PR was opened (`createdAt`) until it became "
+                  "ready for review. 0 if it was never a draft.",
+    "wait_first_review_days": "the days from when the PR became ready for review until the "
+                              "first review that counts was submitted (`reviews.submittedAt`). "
+                              "Blank if no review counts. Never below 0.",
+    "in_review_days": "the days from the first review that counts until the last one that "
+                      "approved (`reviews.state` is APPROVED). Blank if either is missing. "
+                      "Never below 0.",
+    "wait_to_merge_days": "the days from the last approval that counts until the PR was "
+                          "merged (`mergedAt`). Blank if there was no approval.",
+    "size_lines": "the lines added (`additions`) plus the lines deleted (`deletions`).",
+    "approved": "yes if at least one review that counts approved (`reviews.state` is APPROVED).",
+    "reverted": "yes if a later merged PR undid this one (see find_reverted).",
+    "reviews_truncated": "yes if the PR has more reviews (`reviews.totalCount`) than the 100 "
+                         "collected, so a later review may have been missed.",
+}
+
+
 def per_pr(key, pr, reverted):
-    """One PR's row of values. Times are in days, rounded to 2 decimals, and are only
-    calculated for merged PRs. A PR becomes ready for review at its first
-    ready-for-review event (`timelineItems.createdAt`), or when it was opened
-    (`createdAt`) if it was never a draft. One rule per value:
-    time_to_merge_days: the days from when the PR was opened (`createdAt`) until it
-        was merged (`mergedAt`).
-    draft_days: the days from when the PR was opened (`createdAt`) until it became
-        ready for review. 0 if it was never a draft.
-    wait_first_review_days: the days from when the PR became ready for review until
-        the first review that counts was submitted (`reviews.submittedAt`). Blank if no
-        review counts. Never below 0.
-    in_review_days: the days from the first review that counts until the last one
-        that approved (`reviews.state` is APPROVED). Blank if either is missing.
-        Never below 0.
-    wait_to_merge_days: the days from the last approval that counts until the PR was
-        merged (`mergedAt`). Blank if there was no approval.
-    size_lines: the lines added (`additions`) plus the lines deleted (`deletions`).
-    approved: yes if at least one review that counts approved (`reviews.state` is
-        APPROVED).
-    reverted: yes if a later merged PR undid this one (see find_reverted).
-    reviews_truncated: yes if the PR has more reviews (`reviews.totalCount`) than the
-        100 collected, so a later review may have been missed."""
+    """One PR's row of values (rules in VALUE_RULES). Times are in days, rounded to 2
+    decimals, and are only calculated for merged PRs. A PR becomes ready for review at
+    its first ready-for-review event (`timelineItems.createdAt`), or when it was opened
+    (`createdAt`) if it was never a draft; "ready_from" records which."""
     author = (pr.get("author") or {}).get("login") or "ghost"
     created, merged, closed = when(pr["createdAt"]), when(pr["mergedAt"]), when(pr["closedAt"])
     outcome = "merged" if merged else ("closed_unmerged" if closed else "open")
@@ -310,7 +314,7 @@ def per_pr(key, pr, reverted):
         "in_review_days": None, "wait_to_merge_days": None,
         "approved": bool(last_approval), "reverted": key in reverted,
         "reviews_truncated": pr["reviews"]["totalCount"] > len(pr["reviews"]["nodes"]),
-        "ready_from": "first ready-for-review event" if ready_events else "opened (never a draft)",
+        "ready_from": "its first ready-for-review event" if ready_events else "the opened time, as it was never a draft",
         "reviews": reviews,
     }
     if merged:
@@ -504,12 +508,11 @@ def left_out_reason(pr, cfg):
 
 
 def split_by_repo(all_prs, cfg, reverted, range_start, range_end):
-    """Sort PRs by repo. Returns, per repo: the rows of PRs to report, and how many PRs
-    by bots and by authors not in the config list were left out, by login. Left-out PRs
-    are only counted if open now or merged/closed within the report's range."""
+    """Sort PRs by repo. Returns, per repo: the rows of PRs to report, and the PRs left
+    out (see left_out_reason), each with its reason. Left-out PRs are only listed if open
+    now or merged/closed within the report's range."""
     rows = {repo: [] for repo in cfg["repos"]}
-    bots = {repo: Counter() for repo in cfg["repos"]}        # login -> PRs left out
-    not_listed = {repo: Counter() for repo in cfg["repos"]}
+    left_out = {repo: [] for repo in cfg["repos"]}
 
     def in_range(pr):
         t = when(pr["mergedAt"] or pr["closedAt"])
@@ -520,13 +523,15 @@ def split_by_repo(all_prs, cfg, reverted, range_start, range_end):
         if repo not in rows:
             continue
         reason = left_out_reason(pr, cfg)
-        login = (pr.get("author") or {}).get("login") or "unknown"
         if reason:
             if in_range(pr):
-                (bots if reason == "bot" else not_listed)[repo][login] += 1
+                left_out[repo].append({
+                    "key": key, "url": pr["url"], "title": pr["title"],
+                    "author": (pr.get("author") or {}).get("login") or "unknown",
+                    "reason": reason, "merged": pr["mergedAt"], "closed": pr["closedAt"]})
         else:
             rows[repo].append(per_pr(key, pr, reverted))
-    return rows, bots, not_listed
+    return rows, left_out
 
 
 # ---------- main ----------
@@ -553,8 +558,8 @@ def main():
         stop(2, "no columns in that range. Try a longer --last or --since-start.")
 
     reverted = find_reverted(all_prs)  # within each repo, revert PRs by anyone
-    rows_by_repo, bots, not_listed = split_by_repo(all_prs, cfg, reverted,
-                                                   columns[0][0], columns[-1][1])
+    rows_by_repo, left_out = split_by_repo(all_prs, cfg, reverted,
+                                           columns[0][0], columns[-1][1])
 
     # A login is only flagged if it has no PRs in any repo.
     found = {r["author"].lower() for rows in rows_by_repo.values() for r in rows}
@@ -564,6 +569,8 @@ def main():
     print("PR metrics")
 
     for repo, rows in rows_by_repo.items():
+        bots = Counter(p["author"] for p in left_out[repo] if p["reason"] == "bot")
+        not_listed = Counter(p["author"] for p in left_out[repo] if p["reason"] != "bot")
         assign_periods(rows, columns)
         cols = per_column(rows, columns, cfg, now)
         compared = add_markers(cols)
@@ -580,10 +587,10 @@ def main():
             "data_as_of": meta[repo]["last_success_started_at"], "host": meta[repo]["host"],
             "authors": cfg["authors"] or "everyone", "scope": scope,
             "utc_offset": cfg["utc_offset"], "compared": compared,
-            "bot_prs_left_out": sum(bots[repo].values()),
-            "unlisted_author_prs_left_out": sum(not_listed[repo].values()),
-            "bot_logins_left_out": dict(bots[repo].most_common()),
-            "unlisted_logins_left_out": dict(not_listed[repo].most_common()),
+            "bot_prs_left_out": sum(bots.values()),
+            "unlisted_author_prs_left_out": sum(not_listed.values()),
+            "bot_logins_left_out": dict(bots.most_common()),
+            "unlisted_logins_left_out": dict(not_listed.most_common()),
             "partial_columns": [c["label"] for c in cols if c["partial"]],
             "reviews_cut_at_100": [r["key"] for r in shown if r["reviews_truncated"]],
             "authors_with_no_prs": missing,
@@ -596,6 +603,7 @@ def main():
                         "elite_pr_lines": ELITE_PR_LINES},
             "notes": notes,
             "prs": shown,
+            "left_out": left_out[repo],
         }
         slug = repo.replace("/", "-")
         (run_dir / f"results-{slug}.json").write_text(
