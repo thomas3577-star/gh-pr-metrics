@@ -15,11 +15,6 @@ flowchart LR
     D --> M[metrics.py]
     M --> R[report.py]
     R --> H([report per repo<br/>.html])
-    U -->|"Why is PR #123 …?"| A
-    A --> E[explain.py]
-    D --> E
-    M -.->|rules| E
-    E --> P([plain-English answer])
 ```
 
 ## Start in 3 steps
@@ -54,6 +49,15 @@ Each repo gets its own report. Open `output/<date-time>/report-<owner>-<name>.ht
 Pick a period, click **Download shown rows as CSV**, and open it in Excel.
 
 ## Ask about a number
+
+```mermaid
+flowchart LR
+    U([You]) -->|"Why is PR #123 …?"| A[Copilot agent]
+    A --> E[explain.py]
+    D[(data/)] --> E
+    M[metrics.py] -.->|rules| E
+    E --> P([plain-English answer])
+```
 
 Ask the agent in Copilot Chat, for example:
 
