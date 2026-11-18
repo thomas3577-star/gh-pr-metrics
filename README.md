@@ -54,8 +54,8 @@ Pick a period, click **Download shown rows as CSV**, and open it in Excel.
 flowchart LR
     U([You]) -->|"Why is PR #123 …?"| A[Copilot agent]
     A --> E[explain.py]
-    D[(data/)] --> E
-    M[metrics.py] -.->|rules| E
+    O[(report results<br/>output/)] --> E
+    M[metrics.py] -.->|rule text| E
     E --> P([plain-English answer])
 ```
 
@@ -65,9 +65,13 @@ Ask the agent in Copilot Chat, for example:
 - "Why isn't #456 counted?"
 - "Did it consider CI results for #123?"
 
-It answers from that PR's saved data and the rules in `metrics.py`, without fetching.
-Without Copilot, run `python scripts/explain.py --repo owner/repo --pr 123`
-(add the same option as the report, e.g. `--since-start`).
+It answers from the report itself: each PR's times, every review and why it did or
+didn't count, why a PR was left out, and the rule behind each value. Nothing is
+recalculated or fetched, so the answer always matches the report you're looking at.
+
+No Copilot? Get the same explanation in a terminal:
+`python scripts/explain.py --repo owner/repo --pr 123`.
+It explains the newest report; add `--run output/<folder>` for an older one.
 If you disagree with a rule itself, the rules are in [METRICS.md](METRICS.md): raise it with the tool's owner.
 
 ## If it stops

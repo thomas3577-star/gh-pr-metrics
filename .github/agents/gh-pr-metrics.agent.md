@@ -76,7 +76,7 @@ For questions about a metric or a PR (how it is calculated, why a value looks wr
 
 - `METRICS.md`, for what a metric means.
 - `python scripts/explain.py --repo <owner/name> --pr <number>`, for one PR. Add the same report option as the report being discussed. If its "Data as of" is later than the report's, say the data has been refreshed since that report.
-- The report's results file (`output/<run>/results-<owner>-<name>.json`), for which PRs or logins are behind a number: PRs in `prs`, left-out logins in `notes`.
+- The report's results file (`output/<run>/results-<owner>-<name>.json`): counted PRs in `prs`, left-out PRs with their reason in `left_out`.
 
 When answering:
 - Quote values, dates, logins and rules exactly as printed. Never write code that applies a rule or calculates; reading values out of a results file is fine.
