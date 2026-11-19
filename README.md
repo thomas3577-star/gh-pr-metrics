@@ -124,7 +124,6 @@ gh-pr-metrics/
 │   └── check_same.py for whoever changes the scripts (see Changing the scripts)
 ├── METRICS.md        what every number means, with sources
 ├── COMPARISON.md     what's improved over pr-metrics-agent
-├── docs/             maintainability baselines and reviews
 ├── pr-metrics.config.sample.toml   settings template
 ├── pr-metrics.config.toml   your settings      (never committed)
 ├── data/                    saved PRs per repo (never committed)
